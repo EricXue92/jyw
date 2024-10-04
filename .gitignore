@@ -1,3 +1,4 @@
 .DS_Store
 .idea/
 due/__pycache__
+*.arff

@@ -5,6 +5,7 @@ import torch
 from torch.utils.data import TensorDataset, DataLoader, random_split
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
+
 from ucimlrepo import fetch_ucirepo
 
 
@@ -36,7 +37,7 @@ def read_arrf(file_path):
 
 # input: "Twonorm.arff",X.shape: (7400, 20) "Ring.arff", (7400, 20) "Banana.arff" (5300,2)
 def pre_dataset(data):
-    file_path = "datasets/" + data
+    file_path = "lib/" + data
     X, y = read_arrf(file_path)
 
     input_dim = X.shape[1]
@@ -44,7 +45,7 @@ def pre_dataset(data):
 
     # Assuming X and y are numpy arrays
     X_tensor = torch.tensor(X, dtype= torch.float32)  # Convert X to a tensor
-    y_tensor = torch.tensor(y, dtype= torch.float32)  # Convert y to a tensor (assuming classification labels)
+    y_tensor = torch.tensor(y, dtype= torch.long)  # Convert y to a tensor (assuming classification labels)
 
     dataset = TensorDataset(X_tensor, y_tensor)
 
@@ -66,14 +67,15 @@ def pre_dataset(data):
 
     # Convert scaled data back to tensors
     train_dataset = TensorDataset(torch.tensor(X_train_scaled, dtype=torch.float32),
-                                  torch.tensor([y for _, y in train_dataset], dtype= torch.float32)
+                                  torch.tensor([y for _, y in train_dataset], dtype=torch.long)
                                   )
 
     test_dataset = TensorDataset(torch.tensor(X_test_scaled, dtype=torch.float32),
-                                 torch.tensor([y for _, y in test_dataset], dtype=torch.float32)
+                                 torch.tensor([y for _, y in test_dataset], dtype=torch.long)
                                  )
 
     return input_dim, num_classes, train_dataset, test_dataset
+
 
 
 # input: "spam" or "gamma"
@@ -102,11 +104,11 @@ def get_spam_or_gamma_dataset(data_name):
 
     train_dataset = TensorDataset(
         torch.tensor(X_train_scaled, dtype=torch.float32),
-        torch.tensor(y_train, dtype=torch.float32)
+        torch.tensor(y_train, dtype=torch.long)
     )
     test_dataset = TensorDataset(
         torch.tensor(X_test_scaled, dtype=torch.float32),
-        torch.tensor(y_test, dtype=torch.float32)
+        torch.tensor(y_test, dtype=torch.long)
     )
     return input_dim, num_classes, train_dataset, test_dataset
 

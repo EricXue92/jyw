@@ -16,6 +16,7 @@ from lib.utils import set_seed, plot_training_history
 from torch.utils.data import DataLoader
 
 from sngp_wrapper.covert_utils import convert_to_sn_my
+import json
 
 # nvidia-smi
 NUM_WORKERS = os.cpu_count()
@@ -26,8 +27,8 @@ def main(sn_flag = False):
     # ds = get_spam_or_gamma_dataset("gamma")
 
     #### input: "Twonorm.arff",X.shape: (7400, 20) "Ring.arff", (7400, 20) "Banana.arff" (5300,2)
-    ds =  pre_dataset("Banana.arff")
-    input_dim, num_classes, train_dataset, test_dataset = ds
+    # ds =  pre_dataset("Banana.arff")
+    # input_dim, num_classes, train_dataset, test_dataset = ds
 
     n_inducing_points = 10
 
@@ -40,10 +41,10 @@ def main(sn_flag = False):
 
     if sn_flag:
         feature_extractor = SpectralNormResNet( input_dim = input_dim, features = features,
-                                   depth = depth, spectral_normalization = True, coeff = coeff)
+                                   depth = depth, spectral_normalization = True, coeff = coeff).cuda()
     else:
         feature_extractor = SpectralNormResNet(input_dim = input_dim, features = features,
-                                               depth = depth, spectral_normalization = False, coeff = coeff )
+                                               depth = depth, spectral_normalization = False, coeff = coeff ).cuda()
 
     # spec_norm_replace_list = ["Linear", "Conv2D"]
     # spec_norm_bound = 3.  # 9.
@@ -62,7 +63,7 @@ def main(sn_flag = False):
             initial_lengthscale = initial_lengthscale,
             initial_inducing_points = initial_inducing_points,
             kernel = "RBF",
-        )
+        ).cuda()
 
     model = dkl.DKL(feature_extractor, gp)
 
@@ -194,14 +195,16 @@ def main(sn_flag = False):
     pbar = ProgressBar(dynamic_ncols = True)
     pbar.attach(trainer)
 
-    trainer.run(train_loader, max_epochs = 2)
+    trainer.run(train_loader, max_epochs = 50)
     # Done training - time to evaluate
     
     results = {}
+
     evaluator.run(test_loader)
     test_acc = evaluator.state.metrics["accuracy"]
     test_loss = evaluator.state.metrics["loss"]
-    
+
+
     results["test_accuracy"] = test_acc
     results["test_loss"] = test_loss
 
@@ -214,7 +217,30 @@ def main(sn_flag = False):
     if likelihood is not None:
         torch.save(likelihood.state_dict(),  "likelihood.pt")
 
+    test_acc = round(test_acc, 4)
+    return test_acc
+
+
 if __name__ == "__main__":
-    # seed = 23
-    # set_seed(seed)
-    main()
+
+    seed = 23
+    set_seed(seed)
+
+    res = {}
+    data_list = ["Twonorm.arff", "Ring.arff", "Banana.arff", "gamma", "spam"]
+    for data in data_list:
+        if data == "gamma" or data == "spam":
+            ds = get_spam_or_gamma_dataset(data)
+        else:
+            ds = pre_dataset(data)
+        input_dim, num_classes, train_dataset, test_dataset = ds
+        acc = main()
+
+        res.update( { data:acc } )
+
+    file_name = "Final_accuracy.json"
+    # Open the file in write mode and use json.dump() to write the JSON data
+    with open(file_name, 'w') as file:
+        json.dump(res, file, indent = 4)
+
+    print( json.dumps(res) )

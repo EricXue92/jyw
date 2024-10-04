@@ -1,11 +1,11 @@
 import os
 import torch
 import torch.nn as nn
-from datasets.datasets import get_spam_or_gamma_dataset, pre_dataset
+from lib.datasets import get_spam_or_gamma_dataset, pre_dataset
 from lib.helper_functions import accuracy_fn, plot_predictions, plot_decision_boundary
 from torch.utils.data import DataLoader
-from due.DeepResNet import DeepResNet
-from due.SpectralNormResNet import SpectralNormResNet
+from DeepResNet import DeepResNet
+from SpectralNormResNet import SpectralNormResNet
 from tqdm.auto import tqdm
 # from sngp_wrapper.covert_utils import convert_to_sn_my
 from lib.utils import set_seed
@@ -25,7 +25,7 @@ def train(model, data_loader, loss_fn, optimizer, accuracy_fn, device):
     for batch, (X, y) in enumerate(data_loader):
         X, y = X.to(device), y.to(device)
         y_logits  = model(X).squeeze()
-        y_pred = torch.round(torch.sigmoid(y_logits))# turn logits -> pred probs -> pred labls(>0.5 1,  <0.5, 0 )
+        y_pred = torch.round(torch.sigmoid(y_logits))  # turn logits -> pred probs -> pred labls(>0.5 1,  <0.5, 0 )
         loss = loss_fn(y_logits, y)
         train_loss += loss
         train_acc += accuracy_fn(y_true = y,
@@ -46,8 +46,7 @@ def test(model, data_loader, loss_fn,  accuracy_fn, device ):
         for X, y in data_loader:
             X, y = X.to(device), y.to(device)
             test_logits = model(X).squeeze()
-            test_pred = torch.round(torch.sigmoid(test_logits)).type(torch.int64)
-
+            test_pred = torch.round(torch.sigmoid(test_logits))
             test_loss += loss_fn(test_logits, y)
             # y_pred = test_logits.argmax(dim=1)
             # correct = torch.eq(y_true, y_pred).sum().item()
@@ -78,10 +77,16 @@ def main(SN_flag = False):
     batch_size = 128
 
     #### spam or gamma
-    # ds = get_spam_or_gamma_dataset("spam")
+    #
+    path = "../lib/"
+    ds = get_spam_or_gamma_dataset(path + "gamma")
 
     #### input: "Twonorm.arff",X.shape: (7400, 20) "Ring.arff", (7400, 20) "Banana.arff" (5300,2)
-    ds =  pre_dataset("Banana.arff")
+    # ds =  pre_dataset("Twonorm.arff")
+
+    # ds = get_banana_dataset(file_path = "../lib/Banana.arff")
+    ds = get_twonorm_dataset(file_path = "../lib/Twonorm.arff")
+
 
     input_dim, num_classes, train_dataset, test_dataset = ds
 
@@ -122,7 +127,7 @@ def main(SN_flag = False):
     # loss_fn = nn.CrossEntropyLoss()
     # loss = loss_fn(torch.sigmoid(y_logits), y_train)  # Using nn.BCELoss you need torch.sigmoid()
     optimizer = torch.optim.AdamW(model.parameters(), lr= lr)
-    epochs = 2
+    epochs = 200
 
     for epoch in tqdm(range(epochs)):
         print(f"Epoch {epoch}\n-------------------------------")

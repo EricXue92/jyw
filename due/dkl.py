@@ -14,7 +14,6 @@ from gpytorch.variational import (
 
 from sklearn import cluster
 
-# 初始化
 def initial_values(train_dataset, feature_extractor, n_inducing_points):
 
     steps = 10
