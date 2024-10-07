@@ -18,8 +18,26 @@ from torch.utils.data import DataLoader
 from sngp_wrapper.covert_utils import convert_to_sn_my
 import json
 
+
+# Check PyTorch version
+pt_version = torch.__version__  # 2.4.1+cu121
+
 # nvidia-smi
-NUM_WORKERS = os.cpu_count()
+# GPU_SCORE = torch.cuda.get_device_capability()  -> (8, 9)
+
+NUM_WORKERS = os.cpu_count() #  # <- use all available CPU cores
+torch.backends.cuda.matmul.allow_tf32 = True # >= (8, 0)
+#
+# # Set the device
+# device = "cuda" if torch.cuda.is_available() else "cpu"
+# # Set the device globally
+# torch.set_default_device(device)
+
+# total_free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
+# print(f"Total free GPU memory: {round(total_free_gpu_memory * 1e-9, 3)} GB")
+# print(f"Total GPU memory: {round(total_gpu_memory * 1e-9, 3)} GB")
+
+
 
 def main(sn_flag = False):
 
@@ -87,6 +105,7 @@ def main(sn_flag = False):
     parameters = [
         {"params": model.parameters(), "lr": lr},
     ]
+
     parameters.append({"params": likelihood.parameters(), "lr": lr})
 
     optimizer = torch.optim.AdamW(
@@ -159,7 +178,7 @@ def main(sn_flag = False):
     kwargs = {"num_workers": NUM_WORKERS, "pin_memory": True}
 
     train_loader = DataLoader( train_dataset, batch_size = 128, shuffle=True, drop_last = True, **kwargs )
-    test_loader = DataLoader(test_dataset, batch_size = 128, shuffle=True, drop_last = True, **kwargs )
+    test_loader = DataLoader(test_dataset, batch_size = 128, shuffle=True, drop_last = False, **kwargs )
 
     @trainer.on(Events.EPOCH_COMPLETED)
     def log_results(trainer):
@@ -225,6 +244,7 @@ if __name__ == "__main__":
 
     seed = 23
     set_seed(seed)
+    sn_flag = True
 
     res = {}
     data_list = ["Twonorm.arff", "Ring.arff", "Banana.arff", "gamma", "spam"]
@@ -233,12 +253,17 @@ if __name__ == "__main__":
             ds = get_spam_or_gamma_dataset(data)
         else:
             ds = pre_dataset(data)
-        input_dim, num_classes, train_dataset, test_dataset = ds
-        acc = main()
 
+        print(f"Current calculation for {data}")
+
+        input_dim, num_classes, train_dataset, test_dataset = ds
+        acc = main(sn_flag)
         res.update( { data:acc } )
 
-    file_name = "Final_accuracy.json"
+    if sn_flag:
+        file_name = "Final_accuracy_SN_GPIP.json"
+    else:
+        file_name = "Final_accuracy_GPIP.json"
     # Open the file in write mode and use json.dump() to write the JSON data
     with open(file_name, 'w') as file:
         json.dump(res, file, indent = 4)
