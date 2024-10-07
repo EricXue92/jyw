@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 
 from sngp_wrapper.covert_utils import convert_to_sn_my
 import json
-
+import csv
 
 # Check PyTorch version
 pt_version = torch.__version__  # 2.4.1+cu121
@@ -214,7 +214,7 @@ def main(sn_flag = False):
     pbar = ProgressBar(dynamic_ncols = True)
     pbar.attach(trainer)
 
-    trainer.run(train_loader, max_epochs = 50)
+    trainer.run(train_loader, max_epochs = 1)
     # Done training - time to evaluate
     
     results = {}
@@ -248,6 +248,7 @@ if __name__ == "__main__":
 
     res = {}
     data_list = ["Twonorm.arff", "Ring.arff", "Banana.arff", "gamma", "spam"]
+
     for data in data_list:
         if data == "gamma" or data == "spam":
             ds = get_spam_or_gamma_dataset(data)
@@ -260,6 +261,8 @@ if __name__ == "__main__":
         acc = main(sn_flag)
         res.update( { data:acc } )
 
+
+
     if sn_flag:
         file_name = "Final_accuracy_SN_GPIP.json"
     else:
@@ -269,3 +272,10 @@ if __name__ == "__main__":
         json.dump(res, file, indent = 4)
 
     print( json.dumps(res) )
+
+    with open('results.csv', 'w') as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(["data", "accuracy"])
+        for key, value in res.items():
+            writer.writerow([key, value])
+
