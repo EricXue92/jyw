@@ -16,7 +16,6 @@ class UncertaintyMetric(Metric):
         # """Accumulate the uncertainty from each batch."""
         # uncertainty = train_uncertainty(output)
         # self._uncertainties.append(torch.tensor(uncertainty))
-
         _, _, _, uncertainty = output
         self._uncertainties.append(torch.tensor(uncertainty))
 

@@ -173,6 +173,7 @@ def main(sn_flag = False):
     kwargs = {"num_workers": NUM_WORKERS, "pin_memory": True}
 
     train_loader = DataLoader( train_dataset, batch_size=128, shuffle=True, drop_last=True, **kwargs )
+    print(f"Train loader: {len(train_loader)}")
     test_loader = DataLoader(test_dataset, batch_size=128, shuffle=True, drop_last=False, **kwargs )
 
     # Initialize an empty list to accumulate uncertainties across epochs
@@ -186,8 +187,14 @@ def main(sn_flag = False):
 
         pred_uncertainty = metrics["uncertainty"]
 
-        # Accumulate uncertainties across epochs
-        all_uncertainties.append(pred_uncertainty)
+        def accumulate_uncertainties(engine):
+            uncertainty = engine.state.output[-1]
+            all_uncertainties.append(uncertainty)
+            #uncertainty_metric.update(uncertainty)
+
+        # Attach the handler to the trainer
+        trainer.add_event_handler(Events.ITERATION_COMPLETED, accumulate_uncertainties)
+
 
         print(f"Epoch: {trainer.state.epoch} | Train Loss (ELBO): {train_loss:.2f} | Train Acc: {train_acc:.2f} | Uncertainty: {pred_uncertainty}")
 
@@ -220,7 +227,7 @@ def main(sn_flag = False):
     pbar = ProgressBar(dynamic_ncols=True)
     pbar.attach(trainer)
 
-    trainer.run(train_loader, max_epochs=5)
+    trainer.run(train_loader, max_epochs= 2)
 
     # After training, convert accumulated uncertainties to a DataFrame
 
@@ -264,7 +271,7 @@ if __name__ == "__main__":
 
     res = {}
     #data_list = ["Twonorm.arff", "Ring.arff", "Banana.arff", "gamma", "spam"]
-    data_list = ["Twonorm.arff"]
+    data_list = ["gamma"]
 
     for data in data_list:
         if data == "gamma" or data == "spam":
