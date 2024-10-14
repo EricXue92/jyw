@@ -1,5 +1,6 @@
 import os
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ["CUDA_VISIBLE_DEVICES"]="1"
 
 import torch
 from ignite.engine import Events, Engine
@@ -10,17 +11,11 @@ from gpytorch.likelihoods import SoftmaxLikelihood, GaussianLikelihood
 from due import dkl
 from due.SpectralNormResNet import SpectralNormResNet
 from due.DeepResNet import DeepResNet
-
 from datasets.datasets import pre_dataset, get_spam_or_gamma_dataset
 from lib.utils import set_seed, plot_training_history
 from torch.utils.data import DataLoader
-
 from sngp_wrapper.covert_utils import convert_to_sn_my
-import json
 import csv
-
-# Check PyTorch version
-pt_version = torch.__version__  # 2.4.1+cu121
 
 # nvidia-smi
 # GPU_SCORE = torch.cuda.get_device_capability()  -> (8, 9)
@@ -37,33 +32,21 @@ torch.backends.cuda.matmul.allow_tf32 = True # >= (8, 0)
 # print(f"Total free GPU memory: {round(total_free_gpu_memory * 1e-9, 3)} GB")
 # print(f"Total GPU memory: {round(total_gpu_memory * 1e-9, 3)} GB")
 
-
-
 def main(sn_flag = False):
 
-    #### spam or gamma
-    # ds = get_spam_or_gamma_dataset("gamma")
-
-    #### input: "Twonorm.arff",X.shape: (7400, 20) "Ring.arff", (7400, 20) "Banana.arff" (5300,2)
-    # ds =  pre_dataset("Banana.arff")
-    # input_dim, num_classes, train_dataset, test_dataset = ds
-
     n_inducing_points = 10
-
-    # feature_extractor = DeepResNet(input_dim = 2,  num_layers = 3, num_hidden = 128,
-    # activation = "relu", num_outputs = None, dropout_rate = 0.1) # (128 , 128)
-
     features = 128
-    depth = 3
-    coeff = 3. # 0.95
+    depth = 6
+    coeff = 3. # 0.95 9
 
     if sn_flag:
-        feature_extractor = SpectralNormResNet( input_dim = input_dim, features = features,
-                                   depth = depth, spectral_normalization = True, coeff = coeff).cuda()
+        feature_extractor = SpectralNormResNet( input_dim=input_dim, features=features,
+                                   depth=depth, spectral_normalization=True, coeff=coeff).cuda()
     else:
-        feature_extractor = SpectralNormResNet(input_dim = input_dim, features = features,
-                                               depth = depth, spectral_normalization = False, coeff = coeff ).cuda()
+        feature_extractor = SpectralNormResNet(input_dim=input_dim, features=features,
+                                               depth=depth, spectral_normalization=False, coeff=coeff).cuda()
 
+    # From Tao Wang
     # spec_norm_replace_list = ["Linear", "Conv2D"]
     # spec_norm_bound = 3.  # 9.
     # # # Enforcing Spectral-Normalization on each layer
@@ -71,30 +54,27 @@ def main(sn_flag = False):
 
     initial_inducing_points, initial_lengthscale = dkl.initial_values(
             train_dataset, feature_extractor, n_inducing_points
-    )   # (10, 128)
+    )
 
     assert not torch.isnan(initial_inducing_points).any(), "Initial inducing points contain NaN values!"
     assert not torch.isnan(initial_lengthscale).any(), "Initial lengthscale contains NaN values!"
 
     gp = dkl.GP(
-            num_outputs = 2,
-            initial_lengthscale = initial_lengthscale,
-            initial_inducing_points = initial_inducing_points,
-            kernel = "RBF",
+            num_outputs=2,
+            initial_lengthscale=initial_lengthscale,
+            initial_inducing_points=initial_inducing_points,
+            kernel="RBF",
         ).cuda()
 
     model = dkl.DKL(feature_extractor, gp)
 
     ### For regression tasks
     # likelihood = GaussianLikelihood()
-
     # https://github.com/cornellius-gp/gpytorch/issues/1001
 
     # num_features: the number of (independent) features that are output from the GP.
-    likelihood = SoftmaxLikelihood( num_features = 2, num_classes = num_classes, mixing_weights = False )
-
-    elbo_fn = VariationalELBO(likelihood, gp, num_data = len(train_dataset))
-
+    likelihood = SoftmaxLikelihood( num_features=2, num_classes=num_classes, mixing_weights=False )
+    elbo_fn = VariationalELBO(likelihood, gp, num_data=len(train_dataset))
     loss_fn = lambda x, y: -elbo_fn(x, y)
 
     model = model.cuda()
@@ -105,7 +85,6 @@ def main(sn_flag = False):
     parameters = [
         {"params": model.parameters(), "lr": lr},
     ]
-
     parameters.append({"params": likelihood.parameters(), "lr": lr})
 
     optimizer = torch.optim.AdamW(
@@ -113,9 +92,8 @@ def main(sn_flag = False):
     )
 
     milestones = [60, 120, 160]
-
     scheduler = torch.optim.lr_scheduler.MultiStepLR(
-        optimizer, milestones = milestones, gamma=0.2
+        optimizer, milestones=milestones, gamma=0.2
     )
 
     # For plotting
@@ -125,12 +103,15 @@ def main(sn_flag = False):
     def step(engine, batch):
         model.train()
         likelihood.train()
-        
         optimizer.zero_grad()
         x, y = batch
         x, y = x.cuda(), y.cuda() #    y ->  torch.Size([64, 2])
+
+
         y_pred = model(x)   # MultitaskMultivariateNormal(mean shape: torch.Size([64, 2]))
+
         loss = loss_fn(y_pred, y)
+
         loss.backward()
         optimizer.step()
         return y, y_pred, loss.item()
@@ -159,6 +140,7 @@ def main(sn_flag = False):
         y_pred, y = output
         y_pred = y_pred.to_data_independent_dist()
         y_pred = likelihood(y_pred).probs.mean(0)
+
         return y_pred, y
 
     trainer = Engine(step)
@@ -169,16 +151,18 @@ def main(sn_flag = False):
     metric = Accuracy(output_transform=training_accuracy)
     metric.attach(trainer, "accuracy")
 
-    metric = Accuracy(output_transform = output_transform)
+    metric = Accuracy(output_transform=output_transform)
     metric.attach(evaluator, "accuracy")
 
     metric = Loss(lambda y_pred, y: -likelihood.expected_log_prob(y, y_pred).mean())
     metric.attach(evaluator, "loss")
 
+
+
     kwargs = {"num_workers": NUM_WORKERS, "pin_memory": True}
 
-    train_loader = DataLoader( train_dataset, batch_size = 128, shuffle=True, drop_last = True, **kwargs )
-    test_loader = DataLoader(test_dataset, batch_size = 128, shuffle=True, drop_last = False, **kwargs )
+    train_loader = DataLoader( train_dataset, batch_size=128, shuffle=True, drop_last=True, **kwargs )
+    test_loader = DataLoader(test_dataset, batch_size=128, shuffle=True, drop_last=False, **kwargs )
 
     @trainer.on(Events.EPOCH_COMPLETED)
     def log_results(trainer):
@@ -200,6 +184,7 @@ def main(sn_flag = False):
         test_acc = metrics["accuracy"]
         test_loss = metrics["loss"]
 
+
         plot_test_acc.append(test_acc)
         plot_test_loss.append(test_loss)
 
@@ -211,14 +196,12 @@ def main(sn_flag = False):
 
         scheduler.step()
 
-    pbar = ProgressBar(dynamic_ncols = True)
+    pbar = ProgressBar(dynamic_ncols=True)
     pbar.attach(trainer)
 
-    trainer.run(train_loader, max_epochs = 1)
+    trainer.run(train_loader, max_epochs=5)
     # Done training - time to evaluate
-    
     results = {}
-
     evaluator.run(test_loader)
     test_acc = evaluator.state.metrics["accuracy"]
     test_loss = evaluator.state.metrics["loss"]
@@ -261,19 +244,14 @@ if __name__ == "__main__":
         acc = main(sn_flag)
         res.update( { data:acc } )
 
-
-
     if sn_flag:
-        file_name = "Final_accuracy_SN_GPIP.json"
+        # file_name = "SN_GPIP.json"
+        file_name = "SN_GPIP.csv"
     else:
-        file_name = "Final_accuracy_GPIP.json"
-    # Open the file in write mode and use json.dump() to write the JSON data
-    with open(file_name, 'w') as file:
-        json.dump(res, file, indent = 4)
+        # file_name = "Final_accuracy_GPIP.json"
+        file_name = "GPIP.csv"
 
-    print( json.dumps(res) )
-
-    with open('results.csv', 'w') as csv_file:
+    with open(f'{file_name}', 'w') as csv_file:
         writer = csv.writer(csv_file)
         writer.writerow(["data", "accuracy"])
         for key, value in res.items():

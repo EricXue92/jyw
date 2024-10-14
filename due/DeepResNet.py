@@ -3,9 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class DeepResNet(nn.Module):
-
-    def __init__(self, input_dim, num_layers = 3, num_hidden = 128,
-                 activation = "relu", num_outputs = 1, dropout_rate = 0.1):
+    def __init__(self, input_dim, num_layers=3, num_hidden=128,
+                 activation="relu", num_outputs=1, dropout_rate=0.1):
 
         super().__init__()
 

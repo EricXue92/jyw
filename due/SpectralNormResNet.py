@@ -5,8 +5,8 @@ from due.layers import spectral_norm_fc
 
 class SpectralNormResNet(nn.Module):
     def __init__(self, input_dim, features, depth, spectral_normalization,
-                 coeff = 0.95, n_power_iterations = 1, dropout_rate = 0.1,
-                 num_outputs = None, activation = "relu"):
+                 coeff=0.95, n_power_iterations=1, dropout_rate=0.1,
+                 num_outputs=None, activation="relu"):
 
         super().__init__()
         """
@@ -45,7 +45,6 @@ class SpectralNormResNet(nn.Module):
         x = self.activation(self.first(x))
         for residual in self.residuals:
             x = x + self.dropout(self.activation(residual(x)))
-
         if self.num_outputs is not None:
             x = self.last(x)
         return x

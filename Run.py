@@ -1,4 +1,8 @@
 import os
+
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ["CUDA_VISIBLE_DEVICES"]="1"
+
 import torch
 import torch.nn as nn
 from datasets.datasets import get_spam_or_gamma_dataset, pre_dataset
@@ -10,6 +14,10 @@ from tqdm.auto import tqdm
 # from sngp_wrapper.covert_utils import convert_to_sn_my
 from lib.utils import set_seed
 import json
+import csv
+from sklearn.preprocessing import MinMaxScaler
+from torch.utils.data import TensorDataset, random_split
+import csv
 
 NUM_WORKERS = os.cpu_count()
 
@@ -64,8 +72,8 @@ def test(model, data_loader, loss_fn,  accuracy_fn, device ):
             # y_pred = test_logits.argmax(dim=1)
             # correct = torch.eq(y_true, y_pred).sum().item()
             # acc = (correct / len(y_pred)) * 100
-            test_acc += accuracy_fn(y_true = y,
-                                    y_pred = test_pred )
+            test_acc += accuracy_fn(y_true=y,
+                                    y_pred=test_pred )
 
     test_loss /= len(data_loader)
     test_acc /= len(data_loader)
@@ -83,18 +91,11 @@ def main(SN_flag):
 
     batch_size = 128
 
-    #### spam or gamma
-    # ds = get_spam_or_gamma_dataset("spam")
-
-    #### input: "Twonorm.arff",X.shape: (7400, 20) "Ring.arff", (7400, 20) "Banana.arff" (5300,2)
-    # ds =  pre_dataset("Banana.arff")
-    # input_dim, num_classes, train_dataset, test_dataset = ds
-
     kwargs = {"num_workers": NUM_WORKERS, "pin_memory": True}
-    train_dataloader = DataLoader(train_dataset, batch_size = batch_size, shuffle=True,
-                                  drop_last = True, **kwargs )
-    test_dataloader = DataLoader(test_dataset, batch_size = batch_size, shuffle=False,
-                                 drop_last = True, **kwargs )
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                                  drop_last=True, **kwargs )
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
+                                 drop_last=True, **kwargs )
 
     ###  From Tao Wang
     # for testing the performance of normal model
@@ -106,27 +107,27 @@ def main(SN_flag):
     # model = convert_to_sn_my(model, spec_norm_replace_list, spec_norm_bound)
 
     features = 128
-    depth = 3
+    depth = 6
     coeff = 3. # 0.95
-    dropout_rate = 0.01
+    dropout_rate = 0.1 # 0.01
     num_outputs = 1  # regression with 1D output and binary classification
     lr = 3e-3 #
 
     if SN_flag:
         # ResNet + SN
-        model = SpectralNormResNet(input_dim = input_dim, features = features, depth = depth, spectral_normalization = True,
-                                   coeff = coeff,  dropout_rate  = dropout_rate, num_outputs = num_outputs ) # 0.95
+        model = SpectralNormResNet(input_dim=input_dim, features=features, depth=depth, spectral_normalization=True,
+                                   coeff=coeff,  dropout_rate=dropout_rate, num_outputs=num_outputs ) # 0.95
     else:
         # only ResNet
-        model = DeepResNet(input_dim=input_dim, num_layers = depth, num_hidden = features, num_outputs = num_outputs,
-                           dropout_rate  = dropout_rate )
+        model = DeepResNet(input_dim=input_dim, num_layers=depth, num_hidden=features, num_outputs=num_outputs,
+                           dropout_rate=dropout_rate )
 
     # nn.BCEWithLogitsLoss works with raw logits
     loss_fn = nn.BCEWithLogitsLoss()  # # BCEWithLogitsLoss = sigmoid built-in
 
     # loss_fn = nn.CrossEntropyLoss()
     # loss = loss_fn(torch.sigmoid(y_logits), y_train)  # Using nn.BCELoss you need torch.sigmoid()
-    optimizer = torch.optim.AdamW(model.parameters(), lr= lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     epochs = 50
 
     for epoch in tqdm(range(epochs)):
@@ -162,15 +163,13 @@ if __name__ == "__main__":
         res.update({data: acc})
 
     if sn_flag:
-        file_name = "Final_accuracy_SN_Resnet.json"
+        file_name = "SN_Resnet.json"
     else:
-        file_name = "Final_accuracy_Resnet.json"
+        file_name = "Resnet.json"
 
     # Open the file in write mode and use json.dump() to write the JSON data
     with open(file_name, 'w') as file:
-
         json.dump(res, file, indent=4)
-
     print(json.dumps(res))
 
 
