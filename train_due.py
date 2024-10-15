@@ -1,8 +1,7 @@
 import os
-
 import gpytorch
+import numpy as np
 from torch.distributed.elastic.metrics import initialize_metrics
-
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 os.environ["CUDA_VISIBLE_DEVICES"]="1"
 import pandas as pd
@@ -21,21 +20,14 @@ from lib.uncertainty_metric import UncertaintyMetric
 from torch.utils.data import DataLoader
 from sngp_wrapper.covert_utils import convert_to_sn_my
 import csv
-import numpy as np
-# nvidia-smi
-# GPU_SCORE = torch.cuda.get_device_capability()  -> (8, 9)
 
 NUM_WORKERS = os.cpu_count() #  # <- use all available CPU cores
 torch.backends.cuda.matmul.allow_tf32 = True # >= (8, 0)
 #
-# # Set the device
+# Set the device
 # device = "cuda" if torch.cuda.is_available() else "cpu"
 # # Set the device globally
 # torch.set_default_device(device)
-
-# total_free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
-# print(f"Total free GPU memory: {round(total_free_gpu_memory * 1e-9, 3)} GB")
-# print(f"Total GPU memory: {round(total_gpu_memory * 1e-9, 3)} GB")
 
 def main(sn_flag = False):
 
@@ -112,7 +104,6 @@ def main(sn_flag = False):
         x, y = batch
         x, y = x.cuda(), y.cuda() #    y ->  torch.Size([64, 2])
 
-
         y_pred = model(x)   # MultitaskMultivariateNormal(mean shape: torch.Size([64, 2]))
 
         loss = loss_fn(y_pred, y)
@@ -141,6 +132,8 @@ def main(sn_flag = False):
         y,y_pred, loss, _ = output
         y_pred = y_pred.to_data_independent_dist()
         y_pred = likelihood(y_pred).probs.mean(0)
+        if trainer.state.epoch == trainer.state.max_epochs:
+            trainer.state.predictions.append(y_pred.detach().cpu().numpy())  # Store predictions
         return y_pred, y
 
     def training_loss(output):
@@ -151,11 +144,12 @@ def main(sn_flag = False):
         y_pred, y = output
         y_pred = y_pred.to_data_independent_dist()
         y_pred = likelihood(y_pred).probs.mean(0)
-
         return y_pred, y
 
     trainer = Engine(step)
     evaluator = Engine(eval_step)
+
+    trainer.state.predictions = []
 
     metric = Average(output_transform=training_loss)
     metric.attach(trainer, "loss")
@@ -178,10 +172,6 @@ def main(sn_flag = False):
     print(f"Train loader: {len(train_loader)}")
     test_loader = DataLoader(test_dataset, batch_size=128, shuffle=True, drop_last=False, **kwargs )
 
-    @trainer.on(Events.STARTED)
-    def initialize_metrics(trainer):
-        trainer.state.uncertainty = None
-
 
     @trainer.on(Events.EPOCH_COMPLETED)
     def log_results(trainer):
@@ -190,21 +180,12 @@ def main(sn_flag = False):
         train_acc = metrics["accuracy"]
         uncertainty = metrics["uncertainty"]
 
-        print(f"pre_uncertainty: {uncertainty.shape}")
-
-        #global uncertainty
-
         trainer.state.uncertainty = uncertainty_metric.compute()
         uncertainty_metric.reset()
-
-        print(f"uncertainty: {uncertainty.shape}")
-
-
         print(f"Epoch: {trainer.state.epoch} | Train Loss (ELBO): {train_loss:.2f} | Train Acc: {train_acc:.2f} | Uncertainty: {uncertainty}")
 
         plot_train_acc.append(train_acc)
         plot_train_loss.append(train_loss)
-
 
         evaluator.run(test_loader)
         metrics = evaluator.state.metrics
@@ -215,33 +196,24 @@ def main(sn_flag = False):
         plot_test_acc.append(test_acc)
         plot_test_loss.append(test_loss)
 
-        result = f"Test - Epoch: {trainer.state.epoch} "
-        result += f"NLL: {test_loss:.2f} "
-        result += f"Acc: {test_acc:.4f} "
-        print(result)
+        print(f"Test - Epoch: {trainer.state.epoch} | NLL: {test_loss:.2f} | Acc: {test_acc:.4f} ")
 
         scheduler.step()
 
     pbar = ProgressBar(dynamic_ncols=True)
     pbar.attach(trainer)
 
-    trainer.run(train_loader, max_epochs= 2)
+    trainer.run(train_loader, max_epochs= 4)
 
     final_uncertainty = trainer.state.uncertainty
-
-    # After training, convert accumulated uncertainties to a DataFrame
-
-    print(f"Uncertainty shape: {final_uncertainty.shape}")
-    df_uncertainty = pd.DataFrame(final_uncertainty , columns=['uncertainty'])
-
-    # df_all_uncertainties = pd.DataFrame(
-    #     np.concatenate(uncertainty, axis=0),  # Concatenate all uncertainties across epochs
-    #     columns=['uncertainty']
-    # )
-
+    df_uncertainty = pd.DataFrame(final_uncertainty, columns=['uncertainty'])
     df_uncertainty.to_csv("uncertainties.csv", index=False)
 
-    # df_all_uncertainties["uncertainty"].to_csv("uncertainties.csv", index=False)
+    train_preds = trainer.state.predictions
+    train_preds = np.concatenate(train_preds, axis=0)
+    print(f"Train predictions: {len(train_preds)}")
+    df_preds = pd.DataFrame(train_preds, columns=['training_acc0','training_acc1'])
+    df_preds.to_csv("training_acc.csv", index=False)
 
     # Done training - time to evaluate
     results = {}
@@ -255,16 +227,11 @@ def main(sn_flag = False):
     print(f"Final accuracy {results['test_accuracy']:.4f}")
 
     plot_training_history(plot_train_loss, plot_test_loss, plot_train_acc, plot_test_acc)
-
-
     torch.save(model.state_dict(), "model.pt")
-    
     if likelihood is not None:
         torch.save(likelihood.state_dict(),  "likelihood.pt")
 
     test_acc = round(test_acc, 4)
-
-
     return test_acc
 
 
@@ -276,7 +243,7 @@ if __name__ == "__main__":
 
     res = {}
     #data_list = ["Twonorm.arff", "Ring.arff", "Banana.arff", "gamma", "spam"]
-    data_list = ["Banana.arff"]
+    data_list = ["Twonorm.arff"]
 
     for data in data_list:
         if data == "gamma" or data == "spam":
