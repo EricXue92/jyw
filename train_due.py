@@ -184,27 +184,33 @@ def main(sn_flag = False):
         metrics = trainer.state.metrics
         train_loss = metrics["loss"]
         train_acc = metrics["accuracy"]
+        pre_uncertainty = metrics["uncertainty"]
+        print(f"pre_uncertainty: {pre_uncertainty.shape}")
 
-        pred_uncertainty = metrics["uncertainty"]
-
-        def accumulate_uncertainties(engine):
-            uncertainty = engine.state.output[-1]
-            all_uncertainties.append(uncertainty)
-            #uncertainty_metric.update(uncertainty)
-
-        # Attach the handler to the trainer
-        trainer.add_event_handler(Events.ITERATION_COMPLETED, accumulate_uncertainties)
+        global uncertainty
+        uncertainty = uncertainty_metric.compute()
+        uncertainty_metric.reset()
+        
+        print(uncertainty.shape)
+        #print(f"Average Uncertainty at epoch {trainer.state.epoch}: {uncertainty}")
 
 
-        print(f"Epoch: {trainer.state.epoch} | Train Loss (ELBO): {train_loss:.2f} | Train Acc: {train_acc:.2f} | Uncertainty: {pred_uncertainty}")
+        # def accumulate_uncertainties(engine):
+        #     uncertainty = engine.state.output[-1]
+        #     uncertainty_metric.(uncertainty)
+        #
+        #     all_uncertainties.append(uncertainty)
+        #     #uncertainty_metric.update(uncertainty)
+        #
+        # # Attach the handler to the trainer
+        # trainer.add_event_handler(Events.ITERATION_COMPLETED, accumulate_uncertainties)
+
+
+        print(f"Epoch: {trainer.state.epoch} | Train Loss (ELBO): {train_loss:.2f} | Train Acc: {train_acc:.2f} | Uncertainty: {uncertainty}")
 
         plot_train_acc.append(train_acc)
         plot_train_loss.append(train_loss)
 
-        # result = f"Train - Epoch: {trainer.state.epoch} "
-        # result += f"ELBO: {train_loss:.2f} "
-        # result += f"Accuracy: {train_acc :.2f} "
-        # print(result)
 
         evaluator.run(test_loader)
         metrics = evaluator.state.metrics
@@ -227,16 +233,21 @@ def main(sn_flag = False):
     pbar = ProgressBar(dynamic_ncols=True)
     pbar.attach(trainer)
 
-    trainer.run(train_loader, max_epochs= 2)
+    trainer.run(train_loader, max_epochs= 3)
 
     # After training, convert accumulated uncertainties to a DataFrame
 
-    df_all_uncertainties = pd.DataFrame(
-        np.concatenate(all_uncertainties, axis=0),  # Concatenate all uncertainties across epochs
-        columns=['uncertainty', 'uncertainty_']
-    )
+    print(f"Uncertainty shape: {uncertainty.shape}")
+    df_uncertainty = pd.DataFrame(uncertainty, columns=['uncertainty'])
 
-    df_all_uncertainties["uncertainty"].to_csv("uncertainties.csv", index=False)
+    # df_all_uncertainties = pd.DataFrame(
+    #     np.concatenate(uncertainty, axis=0),  # Concatenate all uncertainties across epochs
+    #     columns=['uncertainty']
+    # )
+
+    df_uncertainty.to_csv("uncertainties.csv", index=False)
+
+    # df_all_uncertainties["uncertainty"].to_csv("uncertainties.csv", index=False)
 
     # Done training - time to evaluate
     results = {}
@@ -271,7 +282,7 @@ if __name__ == "__main__":
 
     res = {}
     #data_list = ["Twonorm.arff", "Ring.arff", "Banana.arff", "gamma", "spam"]
-    data_list = ["gamma"]
+    data_list = ["Banana.arff"]
 
     for data in data_list:
         if data == "gamma" or data == "spam":

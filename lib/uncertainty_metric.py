@@ -12,10 +12,6 @@ class UncertaintyMetric(Metric):
 
     def update(self, output):
         """Accumulate the uncertainty from each batch."""
-
-        # """Accumulate the uncertainty from each batch."""
-        # uncertainty = train_uncertainty(output)
-        # self._uncertainties.append(torch.tensor(uncertainty))
         _, _, _, uncertainty = output
         self._uncertainties.append(torch.tensor(uncertainty))
 
@@ -26,6 +22,6 @@ class UncertaintyMetric(Metric):
             raise ValueError("Uncertainty metric must have at least one example before it can be computed.")
 
         # Compute the mean uncertainty over all batches
-        all_uncertainties = torch.stack(self._uncertainties, dim=0)
-        return all_uncertainties.mean(dim=0).cpu().numpy()  # Return the mean uncertainty per task (shape: [2])
+        all_uncertainties = torch.concat(self._uncertainties, dim=0)
+        return all_uncertainties.mean(dim=1).squeeze().cpu().numpy()
 
