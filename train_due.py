@@ -1,6 +1,8 @@
 import os
 
 import gpytorch
+from torch.distributed.elastic.metrics import initialize_metrics
+
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 os.environ["CUDA_VISIBLE_DEVICES"]="1"
 import pandas as pd
@@ -176,34 +178,26 @@ def main(sn_flag = False):
     print(f"Train loader: {len(train_loader)}")
     test_loader = DataLoader(test_dataset, batch_size=128, shuffle=True, drop_last=False, **kwargs )
 
-    # Initialize an empty list to accumulate uncertainties across epochs
-    all_uncertainties = []
+    @trainer.on(Events.STARTED)
+    def initialize_metrics(trainer):
+        trainer.state.uncertainty = None
+
 
     @trainer.on(Events.EPOCH_COMPLETED)
     def log_results(trainer):
         metrics = trainer.state.metrics
         train_loss = metrics["loss"]
         train_acc = metrics["accuracy"]
-        pre_uncertainty = metrics["uncertainty"]
-        print(f"pre_uncertainty: {pre_uncertainty.shape}")
+        uncertainty = metrics["uncertainty"]
 
-        global uncertainty
-        uncertainty = uncertainty_metric.compute()
+        print(f"pre_uncertainty: {uncertainty.shape}")
+
+        #global uncertainty
+
+        trainer.state.uncertainty = uncertainty_metric.compute()
         uncertainty_metric.reset()
-        
-        print(uncertainty.shape)
-        #print(f"Average Uncertainty at epoch {trainer.state.epoch}: {uncertainty}")
 
-
-        # def accumulate_uncertainties(engine):
-        #     uncertainty = engine.state.output[-1]
-        #     uncertainty_metric.(uncertainty)
-        #
-        #     all_uncertainties.append(uncertainty)
-        #     #uncertainty_metric.update(uncertainty)
-        #
-        # # Attach the handler to the trainer
-        # trainer.add_event_handler(Events.ITERATION_COMPLETED, accumulate_uncertainties)
+        print(f"uncertainty: {uncertainty.shape}")
 
 
         print(f"Epoch: {trainer.state.epoch} | Train Loss (ELBO): {train_loss:.2f} | Train Acc: {train_acc:.2f} | Uncertainty: {uncertainty}")
@@ -228,17 +222,17 @@ def main(sn_flag = False):
 
         scheduler.step()
 
-
-
     pbar = ProgressBar(dynamic_ncols=True)
     pbar.attach(trainer)
 
-    trainer.run(train_loader, max_epochs= 3)
+    trainer.run(train_loader, max_epochs= 2)
+
+    final_uncertainty = trainer.state.uncertainty
 
     # After training, convert accumulated uncertainties to a DataFrame
 
-    print(f"Uncertainty shape: {uncertainty.shape}")
-    df_uncertainty = pd.DataFrame(uncertainty, columns=['uncertainty'])
+    print(f"Uncertainty shape: {final_uncertainty.shape}")
+    df_uncertainty = pd.DataFrame(final_uncertainty , columns=['uncertainty'])
 
     # df_all_uncertainties = pd.DataFrame(
     #     np.concatenate(uncertainty, axis=0),  # Concatenate all uncertainties across epochs
