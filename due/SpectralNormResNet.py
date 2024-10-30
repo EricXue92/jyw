@@ -60,3 +60,7 @@ class SpectralNormResNet(nn.Module):
         if activation not in activations:
             raise ValueError(f"Unknown activation function: {activation}")
         return activations[activation]
+
+
+if __name__ == "__main__":
+    pass

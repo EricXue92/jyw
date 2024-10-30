@@ -1,7 +1,6 @@
 import os
 import gpytorch
 import numpy as np
-from torch.distributed.elastic.metrics import initialize_metrics
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 os.environ["CUDA_VISIBLE_DEVICES"]="1"
 import pandas as pd
@@ -13,7 +12,6 @@ from gpytorch.mlls import VariationalELBO
 from gpytorch.likelihoods import SoftmaxLikelihood, GaussianLikelihood
 from due import dkl
 from due.SpectralNormResNet import SpectralNormResNet
-from due.DeepResNet import DeepResNet
 from datasets.datasets import pre_dataset, get_spam_or_gamma_dataset
 from lib.utils import set_seed, plot_training_history
 from lib.uncertainty_metric import UncertaintyMetric
@@ -23,7 +21,7 @@ import csv
 
 NUM_WORKERS = os.cpu_count() #  # <- use all available CPU cores
 torch.backends.cuda.matmul.allow_tf32 = True # >= (8, 0)
-#
+
 # Set the device
 # device = "cuda" if torch.cuda.is_available() else "cpu"
 # # Set the device globally
@@ -33,7 +31,7 @@ def main(sn_flag = False):
 
     n_inducing_points = 10
     features = 128
-    depth = 6
+    depth = 3
     coeff = 3. # 0.95 9
 
     if sn_flag:
@@ -70,7 +68,7 @@ def main(sn_flag = False):
     # https://github.com/cornellius-gp/gpytorch/issues/1001
 
     # num_features: the number of (independent) features that are output from the GP.
-    likelihood = SoftmaxLikelihood( num_features=2, num_classes=num_classes, mixing_weights=False )
+    likelihood = SoftmaxLikelihood(num_features=num_classes, num_classes=num_classes, mixing_weights=False )
     elbo_fn = VariationalELBO(likelihood, gp, num_data=len(train_dataset))
     loss_fn = lambda x, y: -elbo_fn(x, y)
 
@@ -80,9 +78,9 @@ def main(sn_flag = False):
     lr = 3e-3
 
     parameters = [
-        {"params": model.parameters(), "lr": lr},
+        {"params": model.parameters(),'lr':lr},
     ]
-    parameters.append({"params": likelihood.parameters(), "lr": lr})
+    parameters.append({"params": likelihood.parameters(), 'lr':lr})
 
     optimizer = torch.optim.AdamW(
         parameters
@@ -103,21 +101,16 @@ def main(sn_flag = False):
         optimizer.zero_grad()
         x, y = batch
         x, y = x.cuda(), y.cuda() #    y ->  torch.Size([64, 2])
-
         y_pred = model(x)   # MultitaskMultivariateNormal(mean shape: torch.Size([64, 2]))
-
         loss = loss_fn(y_pred, y)
-
         with gpytorch.settings.num_likelihood_samples(32):
             y_pred_temp = y_pred.to_data_independent_dist()
             predictive_dist = likelihood(y_pred_temp)
             probs = predictive_dist.probs
             uncertainty = probs.var(0) # (128, 2)
-
         loss.backward()
         optimizer.step()
         return y, y_pred, loss.item(), uncertainty.detach().cpu().numpy()
-
 
     def eval_step(engine, batch):
         model.eval()
@@ -151,6 +144,7 @@ def main(sn_flag = False):
 
     trainer.state.predictions = []
 
+    ## Attach metrics to the trainer
     metric = Average(output_transform=training_loss)
     metric.attach(trainer, "loss")
     metric = Accuracy(output_transform=training_accuracy)
@@ -161,6 +155,7 @@ def main(sn_flag = False):
     # Attach it to the trainer engine
     uncertainty_metric.attach(trainer, "uncertainty")
 
+    # Attach metrics（accuracy, loss） to the evaluator
     metric = Accuracy(output_transform=output_transform)
     metric.attach(evaluator, "accuracy")
     metric = Loss(lambda y_pred, y: -likelihood.expected_log_prob(y, y_pred).mean())
@@ -182,7 +177,7 @@ def main(sn_flag = False):
 
         trainer.state.uncertainty = uncertainty_metric.compute()
         uncertainty_metric.reset()
-        print(f"Epoch: {trainer.state.epoch} | Train Loss (ELBO): {train_loss:.2f} | Train Acc: {train_acc:.2f} | Uncertainty: {uncertainty}")
+        print(f"Epoch: {trainer.state.epoch} | Train Loss (ELBO): {train_loss:.2f} | Train Acc: {train_acc:.2f} | Uncertainty: {uncertainty.shape}")
 
         plot_train_acc.append(train_acc)
         plot_train_loss.append(train_loss)
@@ -196,14 +191,14 @@ def main(sn_flag = False):
         plot_test_acc.append(test_acc)
         plot_test_loss.append(test_loss)
 
-        print(f"Test - Epoch: {trainer.state.epoch} | NLL: {test_loss:.2f} | Acc: {test_acc:.4f} ")
+        print(f"Test - Epoch: {trainer.state.epoch} | NLL: {test_loss:.4f} | Acc: {test_acc:.4f} ")
 
         scheduler.step()
 
     pbar = ProgressBar(dynamic_ncols=True)
     pbar.attach(trainer)
 
-    trainer.run(train_loader, max_epochs= 4)
+    trainer.run(train_loader, max_epochs=50)
 
     final_uncertainty = trainer.state.uncertainty
     df_uncertainty = pd.DataFrame(final_uncertainty, columns=['uncertainty'])
@@ -211,6 +206,7 @@ def main(sn_flag = False):
 
     train_preds = trainer.state.predictions
     train_preds = np.concatenate(train_preds, axis=0)
+
     print(f"Train predictions: {len(train_preds)}")
     df_preds = pd.DataFrame(train_preds, columns=['training_acc0','training_acc1'])
     df_preds.to_csv("training_acc.csv", index=False)
@@ -227,9 +223,16 @@ def main(sn_flag = False):
     print(f"Final accuracy {results['test_accuracy']:.4f}")
 
     plot_training_history(plot_train_loss, plot_test_loss, plot_train_acc, plot_test_acc)
-    torch.save(model.state_dict(), "model.pt")
-    if likelihood is not None:
-        torch.save(likelihood.state_dict(),  "likelihood.pt")
+
+    model_to_save = {
+        'model': model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'epoch': trainer.state.epoch,
+        'likelihood': likelihood.state_dict()
+    }
+    torch.save(model_to_save, "model.pt")
+    # if likelihood is not None:
+    #     torch.save(likelihood.state_dict(),  "likelihood.pt")
 
     test_acc = round(test_acc, 4)
     return test_acc

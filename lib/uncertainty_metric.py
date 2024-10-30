@@ -21,7 +21,6 @@ class UncertaintyMetric(Metric):
         if len(self._uncertainties) == 0:
             raise ValueError("Uncertainty metric must have at least one example before it can be computed.")
 
-        # Compute the mean uncertainty over all batches
         all_uncertainties = torch.concat(self._uncertainties, dim=0)
         return all_uncertainties.mean(dim=1).squeeze().cpu().numpy()
 

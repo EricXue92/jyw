@@ -7,13 +7,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 import requests
+import os
 
 # 设置np.random.seed(seed) 和 torch.manual_seed(seed), 重复实验
 def set_seed(seed):
-    if seed is None:
-        seed = np.random.randint(1, 1000)
     random.seed(seed)
     np.random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
